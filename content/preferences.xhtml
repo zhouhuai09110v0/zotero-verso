@@ -87,6 +87,8 @@
         <menuitem label="sonnet（质量更好）" value="sonnet"/>
         <menuitem label="opus（最强、最耗额度）" value="opus"/>
       </menupopup></menulist></html:div>
+    <checkbox label="GPT / Claude / Gemini 命令行引擎自动使用 Zotero 的系统代理" preference="extensions.zotero.clitrans.cliUseSystemProxy"/>
+    <html:div class="hint" style="margin-left:0">用 TUN 模式时开不开都可以。如果更新后命令行引擎启动失败（例如提示「系统找不到指定的路径」），可以先关掉它再测试一次。</html:div>
     <html:div class="row"><html:span class="k">单次超时（秒）</html:span>
       <html:input type="number" preference="extensions.zotero.clitrans.cliTimeoutSec"/></html:div>
     <html:div class="row"><html:span class="k">最多同时运行 CLI</html:span>

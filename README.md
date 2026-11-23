@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-0.7.4-D8432E">
+  <img alt="version" src="https://img.shields.io/badge/version-0.7.5-D8432E">
   <img alt="zotero" src="https://img.shields.io/badge/Zotero-7%20%E2%80%93%2010-0F6E6E">
   <img alt="platform" src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS-supported-1C1B19">
   <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-blue">
@@ -54,7 +54,7 @@
 
 ## 安装
 
-1. 在本仓库文件列表中点开最新的 [`verso-0.7.4.xpi`](verso-0.7.4.xpi)，再点 **Download raw file** 下载。
+1. 在本仓库文件列表中点开最新的 [`verso-0.7.5.xpi`](verso-0.7.5.xpi)，再点 **Download raw file** 下载。
    > 用 Firefox 下载时请右键链接选「另存为」，否则浏览器会尝试把它当作自己的扩展安装。
 2. 打开 Zotero → **工具 → 插件**（Tools → Plugins）→ 右上角齿轮 → **从文件安装插件…**（Install Plugin From File…），选中刚下载的 `.xpi`。
 3. 安装完成后无需重启。
@@ -308,6 +308,11 @@ Verso 就是原来的「智译 CLI Translate」，0.7.0 起更名并更换了图
 ---
 
 ## 更新日志
+
+**0.7.5**
+- 中文 Windows 上的报错不再是乱码：命令行工具和系统的输出按 UTF-8 / GBK 自动识别（例如「系统找不到指定的路径」）；
+- 设置页新增开关「GPT / Claude / Gemini 命令行引擎自动使用 Zotero 的系统代理」，引擎启动异常时可关闭排查；
+- Windows 上传给命令行工具的代理变量只设置一次（Windows 不区分变量名大小写）。
 
 **0.7.4**
 - 设置页「检查更新」旁注明：使用 VPN 时请打开 TUN 模式；

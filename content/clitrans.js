@@ -383,13 +383,15 @@ function createCLITrans(env) {
   const PROXY_VARS = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"];
   let proxyCache = null;
   /** Pure: environment for a CLI from a Firefox nsIProxyInfo-like {type, host, port}. */
-  function proxyEnvFromInfo(pi) {
+  function proxyEnvFromInfo(pi, isWin = IS_WIN) {
     if (!pi || !pi.host || !(pi.port > 0) || pi.type === "direct") return {};
     const host = /:/.test(pi.host) && !/^\[/.test(pi.host) ? "[" + pi.host + "]" : pi.host;
     const scheme = pi.type === "socks" ? "socks5h" : pi.type === "socks4" ? "socks4" : "http";
     const url = scheme + "://" + host + ":" + pi.port;
-    const e = { NO_PROXY: "localhost,127.0.0.1,::1", no_proxy: "localhost,127.0.0.1,::1" };
-    for (const k of PROXY_VARS) e[k] = url;
+    // Windows treats HTTPS_PROXY and https_proxy as the same variable: set each name once there
+    const names = isWin ? PROXY_VARS.filter((k) => k === k.toUpperCase()).concat(["NO_PROXY"]) : PROXY_VARS.concat(["NO_PROXY", "no_proxy"]);
+    const e = {};
+    for (const k of names) e[k] = /^no_proxy$/i.test(k) ? "localhost,127.0.0.1,::1" : url;
     return e;
   }
   async function systemProxyInfo(url) {
@@ -436,6 +438,24 @@ function createCLITrans(env) {
       : "插件没有检测到代理：如果你需要通过代理 / VPN 访问 " + service + "，请打开代理软件的「系统代理」或 TUN 模式后重试。");
   }
 
+  /** Pure: bytes → text. CLIs and Python write UTF-8, but cmd.exe and Windows itself answer in the
+   *  console code page (GBK on Chinese Windows): "系统找不到指定的路径" used to arrive as mojibake. */
+  function decodeOutput(bytes, isWin = IS_WIN) {
+    if (!bytes || !bytes.length) return "";
+    try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch (e) {}
+    if (isWin) {
+      for (const enc of ["gb18030", "big5", "shift_jis", "windows-1252"]) {
+        try { return new TextDecoder(enc, { fatal: true }).decode(bytes); } catch (e) {}
+      }
+    }
+    return new TextDecoder("utf-8").decode(bytes);
+  }
+  function concatBytes(chunks) {
+    const n = chunks.reduce((a, c) => a + c.length, 0), out = new Uint8Array(n);
+    let o = 0; for (const c of chunks) { out.set(c, o); o += c.length; }
+    return out;
+  }
+
   async function runProcess(command, args, opts = {}) {
     const { Subprocess, setTimeout, clearTimeout } = env;
     const spec = await launchSpec(command);
@@ -453,18 +473,23 @@ function createCLITrans(env) {
     // the CLI may exit early (e.g. rejecting a flag) before reading stdin
     try { if (opts.stdin != null) await proc.stdin.write(opts.stdin); } catch (e) { LOG("stdin write failed", e); }
     try { await proc.stdin.close(); } catch (e) {}
-    let stdout = "", stderr = "", killed = false;
+    let killed = false;
     const timer = opts.timeoutMs
       ? setTimeout(() => { killed = true; try { proc.kill(); } catch (e) {} }, opts.timeoutMs)
       : null;
-    const pump = async (pipe, sink) => {
-      let s;
-      while ((s = await pipe.readString())) sink(s);
+    // raw bytes, decoded once at the end (UTF-8, else the Windows code page); live progress is UTF-8
+    const pump = async (pipe) => {
+      const chunks = [], live = new TextDecoder("utf-8");
+      for (;;) {
+        const buf = await pipe.read();
+        const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf || 0);
+        if (!u8.length) break;
+        chunks.push(u8.slice());
+        if (opts.onOutput) { const s = live.decode(u8, { stream: true }); if (s) opts.onOutput(s); }
+      }
+      return decodeOutput(concatBytes(chunks));
     };
-    await Promise.all([
-      pump(proc.stdout, (s) => { stdout += s; if (opts.onOutput) opts.onOutput(s); }),
-      pump(proc.stderr, (s) => { stderr += s; if (opts.onOutput) opts.onOutput(s); }),
-    ]);
+    const [stdout, stderr] = await Promise.all([pump(proc.stdout), pump(proc.stderr)]);
     const { exitCode } = await proc.wait();
     if (timer) clearTimeout(timer);
     return { exitCode, stdout, stderr, killed };
@@ -2375,7 +2400,7 @@ function createCLITrans(env) {
       parseGoogleResponse, chunkText, buildCodexArgs, buildClaudeArgs, buildGeminiArgs, parseGeminiResponse,
       splitMessages, pickEngineFromModel, handleChatRequest, handleTranslateRequest, handleMcpRequest,
       parseBatchResult, batchSystemPrompt, parseVisionResult, visionPrompt, translateSegment, runBatch, mcpDispatch, pdf2zhArgs,
-      noteBlockHTML, runWithFlagFallback, proxyEnvFromInfo, aiProxyEnv, netHint, isProxyFailure, friendlyError, cmpVersion, latestUpdate, fetchUpdateManifest, UPDATE_SOURCES, headerValue, formatProgress, fmtDuration,
+      noteBlockHTML, runWithFlagFallback, decodeOutput, proxyEnvFromInfo, aiProxyEnv, netHint, isProxyFailure, friendlyError, cmpVersion, latestUpdate, fetchUpdateManifest, UPDATE_SOURCES, headerValue, formatProgress, fmtDuration,
       normalizePlaceholders, placeholdersIntact, isFormulaDense, isReferenceLike, isFragment, segmentGuard,
       findParagraph, isTranslationTitle, engineFromTitle, docStats, docLayout,
       attached: () => [...attachedWins.keys()].map((w) => { try { return w.location.href.slice(0, 80); } catch (e) { return "?"; } }),
