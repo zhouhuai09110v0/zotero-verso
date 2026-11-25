@@ -41,7 +41,7 @@
       <html:input type="text" preference="extensions.zotero.clitrans.targetLangName"/></html:div>
     <html:div class="row"><html:span class="k">默认引擎</html:span>
       <menulist preference="extensions.zotero.clitrans.defaultEngine"><menupopup>
-        <menuitem label="Google（免费）" value="google"/><menuitem label="GPT · Codex CLI" value="codex"/><menuitem label="Claude · Claude Code CLI" value="claude"/><menuitem label="Gemini" value="gemini"/>
+        <menuitem label="Google（免费）" value="google"/><menuitem label="GPT · Codex CLI" value="codex"/><menuitem label="Claude · Claude Code CLI" value="claude"/><menuitem label="Gemini" value="gemini"/><menuitem label="DeepSeek（API Key）" value="deepseek"/>
       </menupopup></menulist></html:div>
     <checkbox label="选中文字后自动用默认引擎翻译（建议默认引擎设为免费引擎）" preference="extensions.zotero.clitrans.autoTranslate"/>
     <html:div class="row"><html:span class="k">笔记标题</html:span>
@@ -56,7 +56,7 @@
       </menupopup></menulist></html:div>
     <html:div class="row"><html:span class="k">段落翻译引擎</html:span>
       <menulist preference="extensions.zotero.clitrans.paraEngine"><menupopup>
-        <menuitem label="跟随默认引擎" value=""/><menuitem label="Google（免费）" value="google"/><menuitem label="GPT · Codex CLI" value="codex"/><menuitem label="Claude · Claude Code CLI" value="claude"/><menuitem label="Gemini" value="gemini"/>
+        <menuitem label="跟随默认引擎" value=""/><menuitem label="Google（免费）" value="google"/><menuitem label="GPT · Codex CLI" value="codex"/><menuitem label="Claude · Claude Code CLI" value="claude"/><menuitem label="Gemini" value="gemini"/><menuitem label="DeepSeek（API Key）" value="deepseek"/>
       </menupopup></menulist></html:div>
     <html:div class="hint" style="margin-left:0">在 PDF 阅读器里按住快捷键点击任意一段，只翻译这一段：原文会被圈出，译文卡片显示在它正下方，可换引擎、复制、存入笔记。再点一次同一段或点 ✕ 即可收起。修改快捷键后对新打开的文献立即生效。</html:div>
   </groupbox>
@@ -114,11 +114,22 @@
     <html:div class="row"><html:span class="k">Gemini CLI 路径</html:span>
       <html:input type="text" placeholder="留空自动检测（仅在没填 API Key 时使用）" preference="extensions.zotero.clitrans.geminiPath"/></html:div>
     <html:div class="hint">优先级：API Key ＞ Antigravity（agy）＞ Gemini CLI。API Key 以明文保存在 Zotero 配置里，只会发给 Google。</html:div>
+    <html:h2>DeepSeek</html:h2>
+    <html:div class="hint" style="margin-left:0">用 DeepSeek 官方 API，按用量付费、价格低，国内可直连（不需要 VPN）。在 platform.deepseek.com 申请 API Key 填在下面即可。</html:div>
+    <html:div class="row"><html:span class="k">DeepSeek API Key</html:span>
+      <html:input type="password" placeholder="sk-…（在 platform.deepseek.com 申请）" preference="extensions.zotero.clitrans.deepseekApiKey"/></html:div>
+    <html:div class="row"><html:span class="k">DeepSeek 模型</html:span>
+      <menulist editable="true" preference="extensions.zotero.clitrans.deepseekModel" style="flex:1"><menupopup>
+        <menuitem label="deepseek-flash（推荐：快、便宜，支持看图识别公式）" value="deepseek-flash"/>
+        <menuitem label="deepseek-v4-pro（质量更好、更贵，不能看图）" value="deepseek-v4-pro"/>
+      </menupopup></menulist></html:div>
+    <html:div class="hint">插件会关闭 DeepSeek 的「思考模式」，翻译更快、更省钱。API Key 以明文保存在 Zotero 配置里，只会发给 DeepSeek。</html:div>
     <html:div class="row">
       <button id="clitrans-test-google" label="测试 Google"/>
       <button id="clitrans-test-codex" label="测试 GPT·Codex"/>
       <button id="clitrans-test-claude" label="测试 Claude"/>
       <button id="clitrans-test-gemini" label="测试 Gemini"/>
+      <button id="clitrans-test-deepseek" label="测试 DeepSeek"/>
       <button id="clitrans-detect" label="检测路径"/>
     </html:div>
     <html:pre id="clitrans-test-out">点击上方按钮测试连接。</html:pre>
@@ -135,6 +146,7 @@
     <checkbox label="完成后自动打开生成的 PDF" preference="extensions.zotero.clitrans.openDualAfter"/>
     <checkbox label="公式密集的段落保留原文（推导、证明等，避免上下标和公式错乱）" preference="extensions.zotero.clitrans.keepFormulaDense"/>
     <checkbox label="参考文献列表保留原文（避免排版挤压）" preference="extensions.zotero.clitrans.skipReferences"/>
+    <checkbox label="翻译图片中的文字（关闭后图片保持原样，图注仍会翻译；更快、更省额度）" preference="extensions.zotero.clitrans.translateFigures"/>
     <checkbox label="翻译表格内文字（实验性）" preference="extensions.zotero.clitrans.translateTables"/>
     <checkbox label="逐段对照：含分式等复杂公式的段落让模型看图翻译，公式按 LaTeX 排版（GPT / Claude / Gemini，略多耗额度）" preference="extensions.zotero.clitrans.visionFormulas"/>
     <html:div class="hint" style="margin-left:0">用法：在文库里右键条目 →「Verso：整篇翻译」→ 选择引擎；排版在「Verso：排版」或阅读器工具栏的「排版」按钮里切换，已翻译过的文献换排版不会重新翻译。GPT / Claude / Gemini 会把几十个段落合并成一次调用。「逐段对照」直接从原 PDF 裁切原文，每段下方紧接译文，公式和图表原样保留，图中文字（含图片里的文字，macOS 用系统文字识别，Windows 用 RapidOCR）会翻译后叠加在图的副本上；同一段落再次生成时走本地缓存，不重复消耗额度。左右对照、交替页、仅译文也用同一套处理：原文页面保持原样，译文按页排在旁边或后面，公式和图表处理与逐段对照一致。运行环境用本页顶部的「一键配置翻译环境」安装。</html:div>
@@ -142,7 +154,7 @@
 
   <groupbox>
     <label><html:h2>术语表 / 学科词典</html:h2></label>
-    <html:div class="hint" style="margin-left:0">每行一条：英文 = 中文。GPT、Claude、Gemini 会遵守；Google 不支持术语表。</html:div>
+    <html:div class="hint" style="margin-left:0">每行一条：英文 = 中文。GPT、Claude、Gemini、DeepSeek 会遵守；Google 不支持术语表。</html:div>
     <html:textarea id="clitrans-glossary" placeholder="supply chain finance = 供应链金融&#10;bullwhip effect = 牛鞭效应&#10;reverse factoring = 反向保理"/>
   </groupbox>
 

@@ -35,3 +35,7 @@ pref("extensions.zotero.clitrans.autoCheckUpdate", true);
 pref("extensions.zotero.clitrans.lastUpdateCheck", "0");
 pref("extensions.zotero.clitrans.skipUpdateVersion", "");
 pref("extensions.zotero.clitrans.cliUseSystemProxy", true);
+pref("extensions.zotero.clitrans.deepseekApiKey", "");
+pref("extensions.zotero.clitrans.deepseekModel", "deepseek-flash");
+pref("extensions.zotero.clitrans.deepseekBaseURL", "");
+pref("extensions.zotero.clitrans.translateFigures", true);

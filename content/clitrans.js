@@ -178,6 +178,72 @@ function createCLITrans(env) {
       throw new Error("Gemini 暂时不可用（限流或服务端错误）：" + ((lastErr && (lastErr.status || lastErr.message)) || lastErr));
     } finally { geminiActive--; }
   }
+  // ------------------------------------------------------------- deepseek
+  // OpenAI-compatible chat API (api.deepseek.com), reachable from mainland China without a VPN.
+  // Thinking mode is on by default there; translation does not need it, so it is switched off (faster,
+  // cheaper). deepseek-flash also reads images (formulas / figures); deepseek-v4-pro does not.
+  function deepseekModel() { return (pref("deepseekModel") || "deepseek-flash").trim(); }
+  function deepseekBase() { return (pref("deepseekBaseURL") || "https://api.deepseek.com").trim().replace(/\/+$/, ""); }
+  function deepseekCanSee() { return /flash/i.test(deepseekModel()); }
+  /** Pure: request body for a chat completion with optional base64 PNGs. */
+  function buildDeepSeekBody(model, system, user, imagesB64) {
+    const messages = [];
+    if (system) messages.push({ role: "system", content: system });
+    const content = imagesB64 && imagesB64.length
+      ? [{ type: "text", text: user }].concat(imagesB64.map((b) => ({ type: "image_url", image_url: { url: "data:image/png;base64," + b } })))
+      : user;
+    messages.push({ role: "user", content });
+    return { model, messages, thinking: { type: "disabled" }, temperature: 0.2, stream: false };
+  }
+  /** Pure: the answer text, or a readable error. */
+  function parseDeepSeekResponse(d) {
+    if (typeof d === "string") d = JSON.parse(d);
+    const ch = d && Array.isArray(d.choices) ? d.choices[0] : null;
+    const text = ch && ch.message && typeof ch.message.content === "string" ? ch.message.content.trim() : "";
+    if (text) return text;
+    throw new Error("DeepSeek 没有返回内容" + (ch && ch.finish_reason ? "（" + ch.finish_reason + "）" : ""));
+  }
+  /** Pure: DeepSeek's HTTP status → what the user should do. */
+  function deepseekErrorText(status, detail) {
+    const why = { 400: "请求格式不被接受", 401: "API Key 无效，请检查设置里的 DeepSeek API Key",
+      402: "账户余额不足，请到 platform.deepseek.com 充值", 422: "参数不被接受（检查模型名是否正确）",
+      429: "请求太频繁，已达到限速", 500: "DeepSeek 服务器内部错误", 503: "DeepSeek 服务器繁忙" }[status];
+    return "DeepSeek 调用失败" + (status ? "（" + status + "）" : "") + "：" + (why || "") + (detail ? (why ? " · " : "") + String(detail).slice(0, 200) : "");
+  }
+  let deepseekActive = 0;
+  async function callDeepSeek(system, user, images) {
+    const key = (pref("deepseekApiKey") || "").trim();
+    if (!key) throw new Error("DeepSeek 未配置：请在 Zotero 设置 → Verso 里填写 DeepSeek API Key（在 platform.deepseek.com 申请）");
+    const b64 = [];
+    for (const img of images || []) b64.push(await fileBase64(img));
+    const body = buildDeepSeekBody(deepseekModel(), system, user, b64);
+    while (deepseekActive >= 8) await sleep(50);
+    deepseekActive++;
+    try {
+      let lastErr;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        let x;
+        try {
+          x = await Zotero.HTTP.request("POST", deepseekBase() + "/chat/completions", {
+            body: JSON.stringify(body),
+            headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
+            responseType: "json", timeout: 180000, errorDelayIntervals: [], errorDelayMax: 0,
+          });
+        } catch (e) {
+          lastErr = e;
+          const status = e && e.status;
+          if (status === 429 || status === 500 || status === 503) { await sleep(1500 * 2 ** attempt); continue; }
+          let detail = "";
+          try { const r = e.xmlhttp && e.xmlhttp.response; detail = (r && r.error && r.error.message) || ""; } catch (e2) {}
+          if (!status) throw new Error("DeepSeek 连接失败：" + String((e && e.message) || e).slice(0, 160) + "。请检查网络（DeepSeek 在国内可直连，不需要 VPN）。");
+          throw new Error(deepseekErrorText(status, detail));
+        }
+        return parseDeepSeekResponse(x.response);
+      }
+      throw new Error(deepseekErrorText(lastErr && lastErr.status, "重试多次仍失败，请稍后再试"));
+    } finally { deepseekActive--; }
+  }
+
   function buildGeminiArgs(dropped) {
     const a = [];
     const model = geminiModel();
@@ -647,11 +713,13 @@ function createCLITrans(env) {
   function visionCapable(engine) {
     if (engine === "codex" || engine === "claude") return true;
     if (engine === "gemini") { const ch = geminiChannel(); return ch === "api" || ch === "agy"; }
+    if (engine === "deepseek") return deepseekCanSee();
     return false;
   }
   function callVision(engine, system, user, images) {
     if (engine === "claude") return callClaudeVision(system, user, images);
     if (engine === "gemini") return callGemini(system, user, images);
+    if (engine === "deepseek") return callDeepSeek(system, user, images);
     return callCodex(system, user, images);
   }
 
@@ -660,6 +728,7 @@ function createCLITrans(env) {
     codex: { label: "GPT", free: false, llm: true, cli: true },
     claude: { label: "Claude", free: false, llm: true, cli: true },
     gemini: { label: "Gemini", free: false, llm: true },
+    deepseek: { label: "DeepSeek", free: false, llm: true },
   };
   function engineLabel(engine) {
     const e = ENGINES[engine];
@@ -667,6 +736,7 @@ function createCLITrans(env) {
     if (engine === "codex") return e.label + "（" + (pref("codexModel") || "默认") + "）";
     if (engine === "claude") return e.label + "（" + (pref("claudeModel") || "默认") + "）";
     if (engine === "gemini") return e.label + "（" + (geminiChannel() === "agy" ? agyModel() : geminiModel()) + "）";
+    if (engine === "deepseek") return e.label + "（" + deepseekModel() + "）";
     return e.label;
   }
   /** Engines removed in 0.3.0 (microsoft, siliconflow) may still be stored in prefs. */
@@ -678,6 +748,7 @@ function createCLITrans(env) {
     if (engine === "codex") return callCodex(system, user);
     if (engine === "claude") return callClaude(system, user);
     if (engine === "gemini") return callGemini(system, user);
+    if (engine === "deepseek") return callDeepSeek(system, user);
     throw new Error("未知引擎：" + engine);
   }
 
@@ -715,6 +786,7 @@ function createCLITrans(env) {
     codex: { items: 40, chars: 9000 },
     claude: { items: 40, chars: 9000 },
     gemini: { items: 40, chars: 9000 },
+    deepseek: { items: 40, chars: 9000 },
   };
   const queues = {};
   function enqueueBatch(engine, text) {
@@ -1452,6 +1524,7 @@ function createCLITrans(env) {
     const m = String(model || "").toLowerCase();
     if (m.includes("claude")) return "claude";
     if (m.includes("gemini")) return "gemini";
+    if (m.includes("deepseek")) return "deepseek";
     if (m.includes("codex") || m.includes("gpt")) return "codex";
     return null;
   }
@@ -1474,7 +1547,7 @@ function createCLITrans(env) {
       return [400, "application/json", JSON.stringify({ error: { message: "messages required" } })];
     }
     const engine = pickEngineFromModel(body.model);
-    if (!engine) return [400, "application/json", JSON.stringify({ error: { message: "model must be codex, claude or gemini" } })];
+    if (!engine) return [400, "application/json", JSON.stringify({ error: { message: "model must be codex, claude, gemini or deepseek" } })];
     const { system, user } = splitMessages(body.messages);
     try {
       const text = await callLLM(engine, system, user);
@@ -1509,7 +1582,7 @@ function createCLITrans(env) {
     {
       name: "translate_text",
       description: "Translate text with the plugin's engines (google is free and fast; codex/claude use local CLIs; gemini uses an API key or CLI).",
-      inputSchema: { type: "object", properties: { text: { type: "string" }, engine: { type: "string", enum: ["google", "codex", "claude", "gemini"] } }, required: ["text"] },
+      inputSchema: { type: "object", properties: { text: { type: "string" }, engine: { type: "string", enum: ["google", "codex", "claude", "deepseek", "gemini"] } }, required: ["text"] },
     },
   ];
 
@@ -1702,7 +1775,7 @@ function createCLITrans(env) {
     E[PATHS.chat] = makeEndpoint(["POST"], handleChatRequest);
     E[PATHS.translate] = makeEndpoint(["POST"], handleTranslateRequest);
     E[PATHS.models] = makeEndpoint(["GET"], async () => [200, "application/json", JSON.stringify({
-      object: "list", data: ["codex", "claude", "gemini"].map((id) => ({ id, object: "model", owned_by: "local-cli" })),
+      object: "list", data: ["codex", "claude", "gemini", "deepseek"].map((id) => ({ id, object: "model", owned_by: "local-cli" })),
     })]);
     E[PATHS.mcp] = makeEndpoint(["POST", "GET"], handleMcpRequest);
   }
@@ -1761,6 +1834,7 @@ function createCLITrans(env) {
     if (/^GPT/i.test(lbl)) return "codex";
     if (/^Claude/i.test(lbl)) return "claude";
     if (/^Gemini/i.test(lbl)) return "gemini";
+    if (/^DeepSeek/i.test(lbl)) return "deepseek";
     if (/^Google/i.test(lbl)) return "google";
     return ENGINES[pref("docEngine")] ? pref("docEngine") : "google";
   }
@@ -1951,7 +2025,7 @@ function createCLITrans(env) {
       line.setText(formatProgress({ pct, stage: ev.stage, part: ev.part, parts: ev.parts, cur: ev.cur, tot: ev.tot, elapsedMs: now - t0 }));
     };
     resetDocStats();
-    const model = engine === "codex" ? pref("codexModel") : engine === "claude" ? pref("claudeModel") : engine === "gemini" ? (geminiChannel() || "") + "/" + (geminiChannel() === "agy" ? agyModel() : geminiModel()) : "";
+    const model = engine === "codex" ? pref("codexModel") : engine === "claude" ? pref("claudeModel") : engine === "gemini" ? (geminiChannel() || "") + "/" + (geminiChannel() === "agy" ? agyModel() : geminiModel()) : engine === "deepseek" ? deepseekModel() : "";
     // every layout is built by interleave.py: the original is never re-typeset (no garbled formulas),
     // translated formulas are typeset, figure/table text is translated. pdf2zh_next's in-place mode
     // remains below only as a fallback (pref "inPlaceLayout").
@@ -1967,6 +2041,7 @@ function createCLITrans(env) {
           CLITRANS_TRANSLATE_URL: bridgeBaseURL() + "/translate", CLITRANS_TOKEN: pref("bridgeToken"),
           CLITRANS_ENGINE: engine,
           CLITRANS_VISION: visionCapable(engine) && pref("visionFormulas") !== false ? "1" : "",
+          CLITRANS_FIGURES: pref("translateFigures") === false ? "0" : "1",
           CLITRANS_CACHE_KEY: [engine, model, pref("glossary") || "", pref("targetLang") || "zh-CN", "i1",
             pref("skipReferences") !== false ? 1 : 0].join(":"),
         },
@@ -2362,6 +2437,8 @@ function createCLITrans(env) {
     lines.push(ch === "api" ? "✓ Gemini：API Key" : ch === "agy" ? "✓ Gemini：Antigravity（" + resolveTool("agy") + "）"
       : ch === "cli" ? "✓ Gemini：Gemini CLI（不支持看图）"
         : "✗ Gemini 未配置 — 安装并登录 Antigravity，或在下方填写 Gemini API Key");
+    lines.push((pref("deepseekApiKey") || "").trim() ? "✓ DeepSeek：API Key（" + deepseekModel() + "）"
+      : "✗ DeepSeek 未配置 — 在 platform.deepseek.com 申请 API Key 后填在下方（国内可直连）");
     return lines.join("\n");
   }
 
@@ -2381,6 +2458,7 @@ function createCLITrans(env) {
       gemini: geminiChannel() === "api" ? "API Key（" + geminiModel() + "）"
         : geminiChannel() === "agy" ? "Antigravity CLI " + resolveTool("agy") + "（" + agyModel() + "）"
           : resolveTool("gemini"),
+      deepseek: (pref("deepseekApiKey") || "").trim() ? "API Key（" + deepseekModel() + "）" : "",
       bridge: bridgeBaseURL(), mcp,
       claudeMcpCmd: "claude mcp add --scope user --transport http zotero-library " + mcp + hdr,
       codexMcpCmd: "codex mcp add zotero-library --url " + mcp,
@@ -2400,7 +2478,7 @@ function createCLITrans(env) {
       parseGoogleResponse, chunkText, buildCodexArgs, buildClaudeArgs, buildGeminiArgs, parseGeminiResponse,
       splitMessages, pickEngineFromModel, handleChatRequest, handleTranslateRequest, handleMcpRequest,
       parseBatchResult, batchSystemPrompt, parseVisionResult, visionPrompt, translateSegment, runBatch, mcpDispatch, pdf2zhArgs,
-      noteBlockHTML, runWithFlagFallback, decodeOutput, proxyEnvFromInfo, aiProxyEnv, netHint, isProxyFailure, friendlyError, cmpVersion, latestUpdate, fetchUpdateManifest, UPDATE_SOURCES, headerValue, formatProgress, fmtDuration,
+      noteBlockHTML, runWithFlagFallback, decodeOutput, buildDeepSeekBody, parseDeepSeekResponse, deepseekErrorText, proxyEnvFromInfo, aiProxyEnv, netHint, isProxyFailure, friendlyError, cmpVersion, latestUpdate, fetchUpdateManifest, UPDATE_SOURCES, headerValue, formatProgress, fmtDuration,
       normalizePlaceholders, placeholdersIntact, isFormulaDense, isReferenceLike, isFragment, segmentGuard,
       findParagraph, isTranslationTitle, engineFromTitle, docStats, docLayout,
       attached: () => [...attachedWins.keys()].map((w) => { try { return w.location.href.slice(0, 80); } catch (e) { return "?"; } }),

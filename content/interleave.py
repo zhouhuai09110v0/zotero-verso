@@ -407,8 +407,8 @@ def linearize(tokens, em, depth=0, frac_flag=None):
     return re.sub(r"\s*(=|≤|≥|≠|≈|∈|∉|⊂|⊆|≡|→|&lt;|&gt;)\s*", r" \1 ", out)
 
 
-VISION_ENGINES = ("codex", "claude", "gemini")
-VISION_NAME = {"codex": "GPT", "claude": "Claude", "gemini": "Gemini"}  # the plugin sets CLITRANS_VISION only when the channel can see
+VISION_ENGINES = ("codex", "claude", "gemini", "deepseek")
+VISION_NAME = {"codex": "GPT", "claude": "Claude", "gemini": "Gemini", "deepseek": "DeepSeek"}  # the plugin sets CLITRANS_VISION only when the channel can see
 TEXT_FONTS = set()  # fonts that carry the running text of this document: never "math" by name
 BROKEN_FONTS = set()  # math fonts whose text layer lies ("(" extracted as "b", ")" as "#"): use the picture
 BAD_TOKS = set()  # (x0, y0) of glyphs from BROKEN_FONTS (tokens get copied, so not by id)
@@ -1857,10 +1857,13 @@ def main(argv):
     ocr_jobs, tmpdir = [], os.path.join(os.path.dirname(os.path.abspath(out_path)), "ocr-img")
     vinfo = {}  # id(region) -> {"labels": [...], "ocr": bool}
     visual_regs = [p for u in units for p in u["parts"] if p.label not in TEXT_LABELS]
+    # CLITRANS_FIGURES=0 (setting 「翻译图片中的文字」 off): figures stay exactly as printed — no text
+    # extraction, no OCR, no model reading the picture. Tables and captions are still translated.
+    skip_figures = os.environ.get("CLITRANS_FIGURES") == "0"
     for reg in visual_regs:
         u = vinfo.setdefault(id(reg), {"labels": [], "ocr": False})
         u["page"], u["frect"] = src[reg.pno], R(reg.rect)  # where the figure's own text can be searched
-        if reg.label == "isolate_formula":
+        if reg.label == "isolate_formula" or (skip_figures and reg.label == "figure"):
             continue
         vec = [("".join(c["c"] for s in ln["spans"] for c in s["chars"]).strip(), ln["bbox"]) for ln in reg.lines]
         vec = [(t, r) for t, r in vec if t]

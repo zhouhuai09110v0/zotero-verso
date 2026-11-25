@@ -69,6 +69,7 @@
     document.getElementById("clitrans-test-codex").addEventListener("command", test("codex"));
     document.getElementById("clitrans-test-claude").addEventListener("command", test("claude"));
     document.getElementById("clitrans-test-gemini").addEventListener("command", test("gemini"));
+    document.getElementById("clitrans-test-deepseek").addEventListener("command", test("deepseek"));
     document.getElementById("clitrans-codex-models").addEventListener("command", async () => {
       out.textContent = "读取 Codex 模型列表…";
       try {
@@ -121,6 +122,7 @@
       out.textContent =
         "Codex：" + (s.codex || "未找到") + "\nClaude Code：" + (s.claude || "未找到") +
         "\nGemini：" + (s.gemini || "未配置（填 API Key 或安装 Gemini CLI）") +
+        "\nDeepSeek：" + (s.deepseek || "未配置（填 DeepSeek API Key）") +
         "\npdf2zh_next：" + (s.pdf2zh || "未找到") + "\n本地接口：" + s.bridge;
     });
   }

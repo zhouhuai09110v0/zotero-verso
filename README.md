@@ -6,11 +6,11 @@
 
 <p align="center">
   <b>从一个词到一整篇，在 Zotero 里把外文文献读透。</b><br>
-  划词、段落、整篇三种翻译；公式、图表、排版原样保留；用你已有的 GPT / Claude / Gemini 订阅。
+  划词、段落、整篇三种翻译；公式、图表、排版原样保留；用你已有的 GPT / Claude / Gemini 订阅，或国内直连的 DeepSeek。
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-0.7.5-D8432E">
+  <img alt="version" src="https://img.shields.io/badge/version-0.8.0-D8432E">
   <img alt="zotero" src="https://img.shields.io/badge/Zotero-7%20%E2%80%93%2010-0F6E6E">
   <img alt="platform" src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS-supported-1C1B19">
   <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-blue">
@@ -54,7 +54,7 @@
 
 ## 安装
 
-1. 在本仓库文件列表中点开最新的 [`verso-0.7.5.xpi`](verso-0.7.5.xpi)，再点 **Download raw file** 下载。
+1. 在本仓库文件列表中点开最新的 [`verso-0.8.0.xpi`](verso-0.8.0.xpi)，再点 **Download raw file** 下载。
    > 用 Firefox 下载时请右键链接选「另存为」，否则浏览器会尝试把它当作自己的扩展安装。
 2. 打开 Zotero → **工具 → 插件**（Tools → Plugins）→ 右上角齿轮 → **从文件安装插件…**（Install Plugin From File…），选中刚下载的 `.xpi`。
 3. 安装完成后无需重启。
@@ -88,7 +88,7 @@
 
 卡片上可以：
 
-- 点 **Google / GPT / Claude / Gemini** 换一个引擎重新翻译；
+- 点 **Google / GPT / Claude / Gemini / DeepSeek** 换一个引擎重新翻译；
 - 点 **复制** 把译文放进剪贴板；
 - 点 **存入笔记**，原文和译文会追加到该条目下名为「划词翻译笔记」的笔记里（标题可在设置中修改）。
 
@@ -136,7 +136,8 @@
 
 - 译文里的公式用 LaTeX 重新排版，不会变成乱码；
 - 图表中的文字也会翻译；
-- 使用 GPT / Claude / Gemini 时，复杂公式会「看图识别」，上下标、分式都能正确还原；
+- 使用 GPT / Claude / Gemini / DeepSeek（deepseek-flash）时，复杂公式会「看图识别」，上下标、分式都能正确还原；
+- 不需要翻译图片里的文字时，在设置中关闭「翻译图片中的文字」：图片保持原样，图注照常翻译，速度更快、更省额度；
 - 默认跳过参考文献列表（可在设置中修改）。
 
 ---
@@ -151,8 +152,11 @@
 | **GPT** | 走 ChatGPT 订阅额度 | 本机已登录的 [Codex CLI](https://github.com/openai/codex) | 译文质量高，支持看图识别公式 |
 | **Claude** | 走 Claude 订阅额度 | 本机已登录的 [Claude Code](https://claude.com/claude-code) | 译文质量高，支持看图识别公式 |
 | **Gemini** | 走订阅或 API 额度 | [Antigravity](https://antigravity.google/)（`agy`）或 Gemini API Key | 填 API Key 时没有命令行启动延迟 |
+| **DeepSeek** | 按用量付费，价格低 | [DeepSeek API Key](https://platform.deepseek.com/) | **国内可直连，不需要 VPN**；deepseek-flash 支持看图识别公式，deepseek-v4-pro 质量更好但不能看图 |
 
 GPT、Claude 用的是你**本机已经登录的命令行工具**，走你自己的订阅额度，**不需要 API Key**。
+
+DeepSeek 用官方 API：在 [platform.deepseek.com](https://platform.deepseek.com/) 申请 API Key，填到 **Zotero 设置 → Verso → DeepSeek** 即可，点「测试 DeepSeek」检查是否可用。插件会关闭 DeepSeek 的「思考模式」，翻译更快、更省钱。
 
 ### 安装命令行工具
 
@@ -205,7 +209,7 @@ GPT、Claude 用的是你**本机已经登录的命令行工具**，走你自己
 | GPT / Claude | CLI 路径、模型、推理强度 | 留空自动检测 |
 | Gemini | API Key、模型、CLI 路径 | 二选一：API Key 或本机命令行 |
 | 整篇翻译 | 默认排版 | 四种排版之一 |
-| | 跳过参考文献 / 翻译表格 / 看图识别公式 | 按需开关 |
+| | 跳过参考文献 / 翻译图片中的文字 / 翻译表格 / 看图识别公式 | 按需开关 |
 | | 并行数、超时 | 命令行引擎的并发和单次超时 |
 | 术语表 | 每行一条 `原文=译文` | 对所有引擎生效 |
 | MCP | 开关与令牌 | 供 Claude / Codex 等读取文献库 |
@@ -308,6 +312,10 @@ Verso 就是原来的「智译 CLI Translate」，0.7.0 起更名并更换了图
 ---
 
 ## 更新日志
+
+**0.8.0**
+- 新增 **DeepSeek** 引擎：填 API Key 即可用，国内直连不需要 VPN；支持划词、段落、整篇翻译和术语表，deepseek-flash 还能看图识别公式和图中文字；
+- 新增选项「翻译图片中的文字」：关闭后图片保持原样（不做文字识别、不翻译图中文字），图注照常翻译，整篇翻译更快、更省额度。
 
 **0.7.5**
 - 中文 Windows 上的报错不再是乱码：命令行工具和系统的输出按 UTF-8 / GBK 自动识别（例如「系统找不到指定的路径」）；
