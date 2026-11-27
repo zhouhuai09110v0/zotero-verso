@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-0.9.0-D8432E">
+  <img alt="version" src="https://img.shields.io/badge/version-0.9.1-D8432E">
   <img alt="zotero" src="https://img.shields.io/badge/Zotero-7%20%E2%80%93%2010-0F6E6E">
   <img alt="platform" src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS-supported-1C1B19">
   <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-blue">
@@ -55,7 +55,7 @@
 
 ## 安装
 
-1. 在本仓库文件列表中点开最新的 [`verso-0.9.0.xpi`](verso-0.9.0.xpi)，再点 **Download raw file** 下载。
+1. 在本仓库文件列表中点开最新的 [`verso-0.9.1.xpi`](verso-0.9.1.xpi)，再点 **Download raw file** 下载。
    > 用 Firefox 下载时请右键链接选「另存为」，否则浏览器会尝试把它当作自己的扩展安装。
 2. 打开 Zotero → **工具 → 插件**（Tools → Plugins）→ 右上角齿轮 → **从文件安装插件…**（Install Plugin From File…），选中刚下载的 `.xpi`。
 3. 安装完成后无需重启。
@@ -113,10 +113,15 @@
 
 1. 按住 `Alt`（macOS：`⌥ Option`）点击段落，出现译文卡片；
 2. 点卡片上的 **问 AI**，下方展开问答区；
-3. 点快捷问题 **解释这一段 / 公式·符号 / 说得通俗点 / 在全文的作用 / 局限与疑问**，或自己输入问题（Enter 发送，Shift+Enter 换行），可以连续追问；
+3. 点快捷问题 **解释这一段 / 公式·符号 / 图表解读 / 说得通俗点 / 在全文的作用 / 局限与疑问**，或自己输入问题（Enter 发送，Shift+Enter 换行），可以连续追问；
 4. 每条回答都可以 **复制** 或 **存入笔记**（追加到条目下的「划词翻译笔记」，带原文和页码）。
 
-模型会参考：论文标题和摘要、这一段原文和译文、这一页的全文（可在设置里关闭），以及之前的问答。回答引擎可选 GPT / Claude / Gemini / DeepSeek（Google 不能用于问答），卡片上可以临时切换。
+模型会参考：论文标题和摘要、这一段原文和译文、这一页的全文（可在设置里关闭），以及之前的问答。
+
+- **公式**：回答里的公式会排版成真正的数学公式（分式、上下标、希腊字母），不再显示 `$` 符号；重要的式子单独居中显示。
+- **看图**：问「公式 / 符号」或段落里有公式时，插件会把这一段在 PDF 里的样子截图发给模型；问「图表解读」时发送整页截图。这样模型读到的是印刷出来的公式和图表，而不是 PDF 提取出来、可能丢了分式和上下标的文字。需要能看图的引擎：GPT、Claude、Gemini、deepseek-flash（可在设置里关闭）。
+- **表格**：模型给出的对比、数据可以显示为表格。
+- 存入笔记时公式以 `$…$` 保存，Zotero 笔记编辑器会自动显示为公式。回答引擎可选 GPT / Claude / Gemini / DeepSeek（Google 不能用于问答），卡片上可以临时切换。
 
 ### 3. 整篇翻译（保留排版）
 
@@ -325,6 +330,11 @@ Verso 就是原来的「智译 CLI Translate」，0.7.0 起更名并更换了图
 
 ## 更新日志
 
+**0.9.1**
+- 段落问答里的公式正确排版（基于 KaTeX，输出 MathML），不再出现 `$` 等符号；支持独立公式、表格；
+- 问公式时把这一段的截图、问「图表解读」时把整页截图发给能看图的模型，公式和图表按印刷内容解读；
+- 新增快捷问题「图表解读」和设置项「问公式和图表时让模型看图」。
+
 **0.9.0**
 - 新增 **段落问答**（参考 llm-for-zotero 的设计）：段落译文卡片上点「问 AI」，用快捷问题或自己输入，就这一段向大模型提问并追问；模型参考论文标题、摘要、本页全文和这一段的原文与译文；回答可复制、存入笔记；
 - 设置页新增「段落问答」分组：开关、回答引擎、是否附带本页全文。
@@ -374,6 +384,7 @@ Verso 就是原来的「智译 CLI Translate」，0.7.0 起更名并更换了图
 
 - 版面识别和 PDF 处理基于 [BabelDOC / pdf2zh_next](https://github.com/PDFMathTranslate/PDFMathTranslate-next)（AGPL-3.0）和 [PyMuPDF](https://pymupdf.readthedocs.io/)（AGPL-3.0）。
 - 文字识别使用 [RapidOCR](https://github.com/RapidAI/RapidOCR)。
+- 公式排版使用 [KaTeX](https://katex.org/)（MIT 许可，见 `content/lib/KATEX-LICENSE`）。
 
 本项目以 **AGPL-3.0** 许可开源，与上述依赖保持一致，详见 [LICENSE](LICENSE)。
 

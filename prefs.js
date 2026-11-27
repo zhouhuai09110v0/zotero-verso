@@ -42,3 +42,4 @@ pref("extensions.zotero.clitrans.translateFigures", true);
 pref("extensions.zotero.clitrans.qaEnabled", true);
 pref("extensions.zotero.clitrans.qaEngine", "");
 pref("extensions.zotero.clitrans.qaPageContext", true);
+pref("extensions.zotero.clitrans.qaVision", true);

@@ -1108,7 +1108,8 @@ function createCLITrans(env) {
   const QA_ENGINES = ["codex", "claude", "gemini", "deepseek"];
   const QA_QUICK = [
     ["解释这一段", "请解释这一段在说什么，抓住核心观点和论证逻辑。"],
-    ["公式 / 符号", "这一段里的公式、符号或变量分别是什么意思？"],
+    ["公式 / 符号", "这一段里的公式、符号或变量分别是什么意思？逐个说明，并解释公式表达的含义。", "para"],
+    ["图表解读", "请解读这一页上的图或表：它展示了什么、关键数字或趋势是什么、和这一段的论点有什么关系。", "page"],
     ["说得通俗点", "请用通俗易懂的话，把这一段讲给非本专业的人听。"],
     ["在全文的作用", "这一段在整篇论文里起什么作用？和前后文是什么关系？"],
     ["局限与疑问", "这一段的方法、假设或结论可能有哪些局限？读者可以追问什么？"],
@@ -1122,11 +1123,14 @@ function createCLITrans(env) {
     return "You are a careful research assistant helping a reader understand one paragraph of an academic paper. " +
       "Answer in " + (langName || "简体中文") + ". Base the answer on the paper context provided; when you add general " +
       "knowledge that is not in the paper, say so in a few words. If the context cannot answer the question, say that " +
-      "plainly instead of guessing. Be concise (about 200 words unless the reader asks for more). Write mathematics in " +
-      "LaTeX between $…$. Use short paragraphs or bullet lists; no headings, no preamble, no closing pleasantries.";
+      "plainly instead of guessing. Be concise (about 200 words unless the reader asks for more). Formatting: write every " +
+      "formula, variable and symbol in LaTeX — inline as $…$, an important equation on its own line as $$…$$; to explain " +
+      "symbols use a bullet list like \"- $c_1$：meaning\"; for numbers from a table or figure you may use a small Markdown " +
+      "table. Use short paragraphs or bullet lists; no headings, no preamble, no closing pleasantries. If an image is " +
+      "attached, it shows the text exactly as printed: trust it over the extracted text for formulas, symbols, figures and tables.";
   }
   /** Pure: the user message for one question, with the paper context and the conversation so far. */
-  function buildQAPrompt({ title, abstract, pageText, paragraph, translation, history, question }) {
+  function buildQAPrompt({ title, abstract, pageText, paragraph, translation, history, question, imageNote }) {
     const cut = (s, n) => { s = String(s || "").trim(); return s.length > n ? s.slice(0, n) + " …" : s; };
     const parts = [];
     if (title) parts.push("Paper title: " + cut(title, 300));
@@ -1136,8 +1140,41 @@ function createCLITrans(env) {
     if (translation) parts.push("Its translation:\n" + cut(translation, 3000));
     const turns = (history || []).slice(-6);
     if (turns.length) parts.push("Conversation so far:\n" + turns.map((t) => "Q: " + cut(t.q, 800) + "\nA: " + cut(t.a, 1500)).join("\n\n"));
+    if (imageNote) parts.push(imageNote);
     parts.push("Reader's question: " + String(question || "").trim());
     return parts.join("\n\n");
+  }
+  /** Pure: does extracted paragraph text carry formulas whose layout the text has probably lost? */
+  function looksMathy(t) {
+    t = String(t || "");
+    const sym = (t.match(/[=<>≤≥≠≈∑∏∫∂√±×÷∈∉⊂∀∃∞λμσαβγδεθπρτφωΛΔΣΩ∗′^_]/g) || []).length;
+    const vars = (t.match(/(?:^|[\s(])[A-Za-z](?:\s?[0-9]|\b)(?=[\s),.;:<>=+\-])/g) || []).length;
+    return sym >= 2 || (sym >= 1 && vars >= 2) || vars >= 6;
+  }
+  /** PNG of a paragraph (pdf rect, padded) or of the whole page, cut from what pdf.js has drawn. */
+  async function snapshotPage(view, rect, w) {
+    const canvas = view && (view.canvas || (view.div && view.div.querySelector("canvas")));
+    if (!canvas || !canvas.width) return null;
+    const sx = canvas.width / view.viewport.width, sy = canvas.height / view.viewport.height;
+    let x = 0, y = 0, cw = canvas.width, ch = canvas.height;
+    if (rect) {
+      const [a, b, c, d, e, f] = Array.from(view.viewport.transform, Number);
+      const p1 = [a * rect[0] + c * rect[1] + e, b * rect[0] + d * rect[1] + f], p2 = [a * rect[2] + c * rect[3] + e, b * rect[2] + d * rect[3] + f];
+      const pad = 10;
+      x = Math.max(0, (Math.min(p1[0], p2[0]) - pad) * sx); y = Math.max(0, (Math.min(p1[1], p2[1]) - pad) * sy);
+      cw = Math.min(canvas.width - x, (Math.abs(p2[0] - p1[0]) + 2 * pad) * sx); ch = Math.min(canvas.height - y, (Math.abs(p2[1] - p1[1]) + 2 * pad) * sy);
+    }
+    const out = canvas.ownerDocument.createElement("canvas");
+    const k = Math.min(1, 1600 / Math.max(cw, ch)); // keep images small: faster, cheaper
+    out.width = Math.max(1, Math.round(cw * k)); out.height = Math.max(1, Math.round(ch * k));
+    const g = out.getContext("2d");
+    g.fillStyle = "#fff"; g.fillRect(0, 0, out.width, out.height);
+    g.drawImage(canvas, x, y, cw, ch, 0, 0, out.width, out.height);
+    const blob = await new Promise((res) => out.toBlob(res, "image/png"));
+    if (!blob) return null;
+    const path = joinPath(tmpDir(), "verso-qa-" + uid() + ".png");
+    await IOUtils.write(path, new Uint8Array(await blob.arrayBuffer()));
+    return path;
   }
   /** Pure-ish: plain text of a page from Zotero's char list (for context). */
   function pageTextOf(chars) {
@@ -1145,20 +1182,101 @@ function createCLITrans(env) {
     for (const c of chars || []) { t += c.c == null ? "" : c.c; if (c.lineBreakAfter) t += "\n"; else if (c.spaceAfter) t += " "; }
     return t.replace(/-\n(?=[a-z])/g, "").replace(/\n(?!\n)/g, " ").replace(/[ \t]+/g, " ").trim();
   }
-  /** Minimal Markdown → DOM (paragraphs, bullet / numbered lists, **bold**, `code`); never innerHTML. */
+  // LaTeX → MathML with KaTeX (MIT, content/lib). Firefox draws MathML natively, so no fonts or CSS are needed.
+  let katexLib = null;
+  function katex() {
+    if (katexLib === null) {
+      try {
+        const scope = { module: { exports: {} }, exports: {} };
+        env.Services.scriptloader.loadSubScript(env.rootURI + "content/lib/katex.min.js", scope);
+        katexLib = scope.module.exports && scope.module.exports.renderToString ? scope.module.exports : false;
+      } catch (e) { LOG("KaTeX load failed", e); katexLib = false; }
+    }
+    return katexLib || null;
+  }
+  /** Pure: split text into [{t:"text"|"math"|"dmath", v}] — $…$, \(…\), $$…$$, \[…\]. money stays text (see the regex). */
+  function splitMath(text) {
+    const out = [], re = /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$(?!\s)([^$\n]+?)(?<!\s)\$(?!\d)/g; // money stays text: "$5 and $10", "$5$10"
+    let last = 0, m;
+    while ((m = re.exec(text))) {
+      if (m.index > last) out.push({ t: "text", v: text.slice(last, m.index) });
+      if (m[1] != null || m[2] != null) out.push({ t: "dmath", v: (m[1] != null ? m[1] : m[2]).trim() });
+      else out.push({ t: "math", v: (m[3] != null ? m[3] : m[4]).trim() });
+      last = re.lastIndex;
+    }
+    if (last < text.length) out.push({ t: "text", v: text.slice(last) });
+    return out;
+  }
+  function mathNode(doc, tex, display) {
+    const k = katex();
+    if (k) {
+      try {
+        const html = k.renderToString(tex, { output: "mathml", displayMode: !!display, throwOnError: false, strict: "ignore" });
+        const parsed = new doc.defaultView.DOMParser().parseFromString("<body>" + html + "</body>", "text/html");
+        const math = parsed.querySelector("math");
+        if (math && !parsed.querySelector(".katex-error")) {
+          const node = doc.importNode(math, true);
+          node.style.cssText = display ? "display:block;margin:6px 0;font-size:1.08em;overflow-x:auto;" : "font-size:1.05em;";
+          return node;
+        }
+      } catch (e) { LOG("KaTeX render failed", e); }
+    }
+    const c = doc.createElement("code"); // fallback: show the LaTeX, without the dollar signs
+    c.textContent = tex;
+    c.style.cssText = "font-size:.92em;padding:0 3px;border-radius:3px;background:rgba(15,110,110,.10);";
+    return c;
+  }
+  /** Minimal Markdown → DOM: paragraphs, lists, tables, **bold**, `code`, LaTeX math; never innerHTML of model text. */
   function renderAnswer(doc, text) {
     const frag = doc.createDocumentFragment();
     const inline = (el, s) => {
+      for (const seg of splitMath(String(s))) {
+        if (seg.t !== "text") { el.appendChild(mathNode(doc, seg.v, seg.t === "dmath")); continue; }
+        inlineText(el, seg.v);
+      }
+    };
+    const inlineText = (el, s) => {
       for (const tok of String(s).split(/(\*\*[^*]+\*\*|`[^`]+`)/g)) {
         if (!tok) continue;
-        if (/^\*\*[^*]+\*\*$/.test(tok)) { const b = doc.createElement("strong"); b.textContent = tok.slice(2, -2); el.appendChild(b); }
+        if (/^\*\*[^*]+\*\*$/.test(tok)) { const b = doc.createElement("strong"); inline(b, tok.slice(2, -2)); el.appendChild(b); }
         else if (/^`[^`]+`$/.test(tok)) { const c = doc.createElement("code"); c.textContent = tok.slice(1, -1); c.style.cssText = "font-size:.92em;padding:0 3px;border-radius:3px;background:rgba(15,110,110,.10);"; el.appendChild(c); }
         else el.appendChild(doc.createTextNode(tok));
       }
     };
+    // $$ … $$ blocks may span lines: put each on a line of its own first
+    const src = String(text || "").replace(/\r/g, "")
+      .replace(/\$\$([\s\S]+?)\$\$/g, (m0, b) => "\n$$" + b.replace(/\n/g, " ") + "$$\n")
+      .replace(/\\\[([\s\S]+?)\\\]/g, (m0, b) => "\n$$" + b.replace(/\n/g, " ") + "$$\n");
+    const lines = src.split("\n");
     let list = null;
-    for (const raw of String(text || "").replace(/\r/g, "").split("\n")) {
-      const line = raw.replace(/^#{1,6}\s+/, "");
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li].replace(/^#{1,6}\s+/, "");
+      // Markdown table: consecutive lines that start with "|"
+      if (/^\s*\|.*\|\s*$/.test(line)) {
+        const rows = [];
+        while (li < lines.length && /^\s*\|.*\|\s*$/.test(lines[li])) rows.push(lines[li++]);
+        li--;
+        const cells = (r) => r.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+        const body = rows.filter((r) => !/^[\s|:-]+$/.test(r)); // drop the |---|---| separator row
+        const table = doc.createElement("table");
+        table.style.cssText = "border-collapse:collapse;margin:4px 0 8px;font-size:12.8px;width:100%;";
+        body.forEach((r, ri) => {
+          const tr = doc.createElement("tr");
+          for (const c of cells(r)) {
+            const td = doc.createElement(ri === 0 ? "th" : "td");
+            td.style.cssText = "border:1px solid rgba(15,110,110,.25);padding:3px 6px;text-align:left;vertical-align:top;" + (ri === 0 ? "background:rgba(15,110,110,.08);font-weight:600;" : "");
+            inline(td, c);
+            tr.appendChild(td);
+          }
+          table.appendChild(tr);
+        });
+        frag.appendChild(table);
+        list = null;
+        continue;
+      }
+      // a line that is only display math
+      const dm = line.trim().match(/^\$\$([\s\S]+)\$\$$/);
+      if (dm) { list = null; frag.appendChild(mathNode(doc, dm[1].trim(), true)); continue; }
       const m = line.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)$/);
       if (m) {
         if (!list) { list = doc.createElement(/^\s*\d/.test(line) ? "ol" : "ul"); list.style.cssText = "margin:2px 0 6px;padding-left:20px;"; frag.appendChild(list); }
@@ -1208,8 +1326,8 @@ function createCLITrans(env) {
       meta.appendChild(engBtns[k]);
     }
     paintEng();
-    for (const [label, q] of QA_QUICK) {
-      const b = mkPill(doc, label, () => ask(q, label));
+    for (const [label, q, pic] of QA_QUICK) {
+      const b = mkPill(doc, label, () => ask(q, label, pic));
       b.style.borderColor = T.line;
       quick.appendChild(b);
     }
@@ -1234,7 +1352,7 @@ function createCLITrans(env) {
       log.scrollTop = log.scrollHeight;
       return b;
     };
-    async function ask(question, shown) {
+    async function ask(question, shown, pic) {
       question = String(question || "").trim();
       if (!question || busy) return;
       busy = true; input.value = ""; input.style.height = "auto"; send.textContent = "…";
@@ -1248,15 +1366,30 @@ function createCLITrans(env) {
       const t0 = Date.now(), eng = engine;
       try {
         const c = await ctx();
-        const text = String(await callLLM(eng, qaSystemPrompt(pref("targetLangName") || "简体中文"),
-          buildQAPrompt(Object.assign({}, c, { history, question })))).trim();
+        // formulas and figures: let a vision engine look at the printed paragraph / page
+        const want = pic || (c.mathy ? "para" : "");
+        let images = [], imageNote = "", noVision = "";
+        if (want && pref("qaVision") !== false && c.snapshot) {
+          if (visionCapable(eng)) {
+            const img = await c.snapshot(want).catch((e) => { LOG("snapshot failed", e); return null; });
+            if (img) {
+              images = [img];
+              imageNote = want === "page" ? "Attached image: the whole PDF page as printed (read its figures and tables from it)."
+                : "Attached image: the paragraph exactly as printed in the PDF (read formulas and symbols from it).";
+            }
+          } else noVision = engineLabel(eng) + " 不能看图，本次只根据提取的文字回答";
+        }
+        if (noVision) st.textContent += "（" + noVision + "）";
+        const sys = qaSystemPrompt(pref("targetLangName") || "简体中文");
+        const user = buildQAPrompt(Object.assign({}, c, { history, question, imageNote }));
+        const text = String(images.length ? await callVision(eng, sys, user, images) : await callLLM(eng, sys, user)).trim();
         history.push({ q: question, a: text });
         a.textContent = "";
         a.appendChild(renderAnswer(doc, text));
         const foot = doc.createElement("div");
         foot.style.cssText = "display:flex;gap:5px;align-items:center;margin-top:4px;font-size:11px;color:#7A746A;";
         const lbl = doc.createElement("span");
-        lbl.textContent = engineLabel(eng) + " · " + ((Date.now() - t0) / 1000).toFixed(1) + "s";
+        lbl.textContent = engineLabel(eng) + (images.length ? " · 看图" : "") + " · " + ((Date.now() - t0) / 1000).toFixed(1) + "s";
         lbl.style.marginRight = "auto";
         const cp = mkPill(doc, "复制", (b) => { try { Zotero.Utilities.Internal.copyTextToClipboard(text); b.textContent = "已复制 ✓"; } catch (e) {} });
         const sv = mkPill(doc, "存入笔记", async (b) => {
@@ -1606,6 +1739,8 @@ function createCLITrans(env) {
             title: parent ? parent.getField("title") : "",
             abstract: parent ? parent.getField("abstractNote") : "",
             pageText: pref("qaPageContext") === false ? "" : pageTextOf(page && page.chars),
+            mathy: looksMathy(para.text),
+            snapshot: (what) => snapshotPage(view, what === "page" ? null : para.rect, w),
           };
         },
       },
@@ -2705,7 +2840,7 @@ function createCLITrans(env) {
       parseGoogleResponse, chunkText, buildCodexArgs, buildClaudeArgs, buildGeminiArgs, parseGeminiResponse,
       splitMessages, pickEngineFromModel, handleChatRequest, handleTranslateRequest, handleMcpRequest,
       parseBatchResult, batchSystemPrompt, parseVisionResult, visionPrompt, translateSegment, runBatch, mcpDispatch, pdf2zhArgs,
-      noteBlockHTML, qaNoteBlockHTML, buildQAPrompt, qaSystemPrompt, pageTextOf, qaEngine, runWithFlagFallback, decodeOutput, buildDeepSeekBody, parseDeepSeekResponse, deepseekErrorText, proxyEnvFromInfo, aiProxyEnv, netHint, isProxyFailure, friendlyError, cmpVersion, latestUpdate, fetchUpdateManifest, UPDATE_SOURCES, headerValue, formatProgress, fmtDuration,
+      noteBlockHTML, qaNoteBlockHTML, splitMath, looksMathy, renderAnswer, katex, buildQAPrompt, qaSystemPrompt, pageTextOf, qaEngine, runWithFlagFallback, decodeOutput, buildDeepSeekBody, parseDeepSeekResponse, deepseekErrorText, proxyEnvFromInfo, aiProxyEnv, netHint, isProxyFailure, friendlyError, cmpVersion, latestUpdate, fetchUpdateManifest, UPDATE_SOURCES, headerValue, formatProgress, fmtDuration,
       normalizePlaceholders, placeholdersIntact, isFormulaDense, isReferenceLike, isFragment, segmentGuard,
       findParagraph, isTranslationTitle, engineFromTitle, docStats, docLayout,
       attached: () => [...attachedWins.keys()].map((w) => { try { return w.location.href.slice(0, 80); } catch (e) { return "?"; } }),
