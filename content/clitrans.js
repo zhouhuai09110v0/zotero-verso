@@ -1627,25 +1627,62 @@ function createCLITrans(env) {
         cur = null;
       }
     }
-    const L = lines.findIndex((l) => hit >= l.a && hit <= l.b);
-    const h = Math.max(4, lines[L].r[3] - lines[L].r[1]);
+    // pieces printed on one visual row (a stacked fraction, an equation and its number) become one row
+    const charH = (l) => {
+      const hs = [];
+      for (let k = l.a; k <= l.b; k++) { const r = chars[k].rect; if (r && chars[k].c && chars[k].c.trim()) hs.push(r[3] - r[1]); }
+      hs.sort((x, y) => x - y);
+      return hs.length ? hs[Math.floor(hs.length / 2)] : l.r[3] - l.r[1];
+    };
+    const rows = [];
+    for (const l of lines) {
+      const p = rows[rows.length - 1];
+      const vo = p ? Math.min(p.r[3], l.r[3]) - Math.max(p.r[1], l.r[1]) : -1; // vertical overlap
+      if (p && vo > 0.3 * Math.min(p.r[3] - p.r[1], l.r[3] - l.r[1]) && l.r[0] < p.r[2] + 40 && l.r[2] > p.r[0] - 40) {
+        p.b = l.b; p.pb = l.pb;
+        p.r = [Math.min(p.r[0], l.r[0]), Math.min(p.r[1], l.r[1]), Math.max(p.r[2], l.r[2]), Math.max(p.r[3], l.r[3])];
+        p.fs = Math.max(p.fs, charH(l));
+      } else rows.push(Object.assign({}, l, { r: l.r.slice(), fs: charH(l) }));
+    }
+    const L = rows.findIndex((l) => hit >= l.a && hit <= l.b);
+    const h = Math.max(4, rows[L].fs); // font size from the characters: math inflates the row's box
+    const W = (l) => l.r[2] - l.r[0];
+    const overlapX = (up, down) => Math.min(up.r[2], down.r[2]) - Math.max(up.r[0], down.r[0]) > 0.4 * Math.min(W(up), W(down));
+    const gapOf = (up, down) => up.r[1] - down.r[3];
+    // the page's usual space between two rows of a paragraph (double-spaced manuscripts leave more than a
+    // line height between rows): median of the gaps between consecutive rows of the same column
+    const gaps = [];
+    for (let k = 0; k + 1 < rows.length; k++) {
+      const g = gapOf(rows[k], rows[k + 1]);
+      if (overlapX(rows[k], rows[k + 1]) && g > 0 && g < 2.5 * h) gaps.push(g);
+    }
+    gaps.sort((x, y) => x - y);
+    const lead = gaps.length >= 3 ? gaps[Math.floor(gaps.length / 2)] : 0;
     const near = (up, down) => {
-      const ov = Math.min(up.r[2], down.r[2]) - Math.max(up.r[0], down.r[0]);
-      const gap = up.r[1] - down.r[3];
-      return ov > 0.4 * Math.min(up.r[2] - up.r[0], down.r[2] - down.r[0]) && gap < 0.9 * h && gap > -0.6 * h;
+      const gap = gapOf(up, down);
+      return overlapX(up, down) && gap < Math.max(0.9 * h, 1.45 * lead) && gap > -0.6 * h;
     };
     let lo = L, hi = L;
-    while (lo > 0 && near(lines[lo - 1], lines[lo])) lo--;
-    while (hi < lines.length - 1 && near(lines[hi], lines[hi + 1])) hi++;
+    while (lo > 0 && near(rows[lo - 1], rows[lo])) lo--;
+    while (hi < rows.length - 1 && near(rows[hi], rows[hi + 1])) hi++;
     let left = Infinity, right = -Infinity;
-    for (let k = lo; k <= hi; k++) { left = Math.min(left, lines[k].r[0]); right = Math.max(right, lines[k].r[2]); }
-    const breaksBetween = (up, down) =>
-      up.pb || down.r[0] - left > 0.8 * h || right - up.r[2] > 2.2 * h;
+    for (let k = lo; k <= hi; k++) { left = Math.min(left, rows[k].r[0]); right = Math.max(right, rows[k].r[2]); }
+    const breaksBetween = (up, down) => {
+      const gap = gapOf(up, down);
+      if (down.r[0] - left > 0.8 * h) return true;        // indented first line, or a displayed equation
+      if (up.r[0] - left > 3 * h) return true;            // after a displayed (centred / indented) equation
+      if (right - up.r[2] > 2.2 * h) return true;          // short last line
+      if (Math.abs(up.fs - down.fs) > 0.14 * Math.max(up.fs, down.fs)) return true; // header / caption font
+      if (lead && gap > 1.3 * lead) return true;           // extra space between paragraphs
+      // Zotero sometimes flags a paragraph end inside a justified paragraph (often next to formulas):
+      // trust the flag only when the row does not run to the right margin
+      return up.pb && right - up.r[2] > 1.0 * h;
+    };
     let a = L, b = L;
-    while (a > lo && !breaksBetween(lines[a - 1], lines[a])) a--;
-    while (b < hi && !breaksBetween(lines[b], lines[b + 1])) b++;
-    a = lines[a].a;
-    b = lines[b].b;
+    while (a > lo && !breaksBetween(rows[a - 1], rows[a])) a--;
+    while (b < hi && !breaksBetween(rows[b], rows[b + 1])) b++;
+    a = rows[a].a;
+    b = rows[b].b;
     let text = "";
     const rect = [Infinity, Infinity, -Infinity, -Infinity];
     for (let i = a; i <= b; i++) {

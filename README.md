@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-0.9.2-D8432E">
+  <img alt="version" src="https://img.shields.io/badge/version-0.9.3-D8432E">
   <img alt="zotero" src="https://img.shields.io/badge/Zotero-7%20%E2%80%93%2010-0F6E6E">
   <img alt="platform" src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS-supported-1C1B19">
   <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-blue">
@@ -55,7 +55,7 @@
 
 ## 安装
 
-1. 在本仓库文件列表中点开最新的 [`verso-0.9.2.xpi`](verso-0.9.2.xpi)，再点 **Download raw file** 下载。
+1. 在本仓库文件列表中点开最新的 [`verso-0.9.3.xpi`](verso-0.9.3.xpi)，再点 **Download raw file** 下载。
    > 用 Firefox 下载时请右键链接选「另存为」，否则浏览器会尝试把它当作自己的扩展安装。
 2. 打开 Zotero → **工具 → 插件**（Tools → Plugins）→ 右上角齿轮 → **从文件安装插件…**（Install Plugin From File…），选中刚下载的 `.xpi`。
 3. 安装完成后无需重启。
@@ -331,6 +331,11 @@ Verso 就是原来的「智译 CLI Translate」，0.7.0 起更名并更换了图
 ---
 
 ## 更新日志
+
+**0.9.3**
+- 段落识别更准：双倍行距的投稿稿件（行距大于字高）以前常常只选中一行，现在按页面实际行距判断，能选中整段；
+- 分式、带编号的独立公式算作一行，不再被拆开；页眉、图注等字号不同的文字不会混进正文段落；
+- Zotero 在公式附近误标的「段落结束」会被识别并忽略。
 
 **0.9.2**
 - 段落翻译：含公式的段落改为看图翻译，译文里的公式（分式、上下标、希腊字母）按排版显示，不再丢失；普通段落不受影响；

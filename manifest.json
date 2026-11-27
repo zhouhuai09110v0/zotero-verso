@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Verso",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "description": "Translate papers inside Zotero · 划词 / 段落 / 整篇翻译（保留排版的双语 PDF）。Google 免费引擎 + 本机已登录的 Codex(GPT)、Claude Code、Gemini，以及 DeepSeek API，公式与图表看图识别，术语表、存入笔记、文献库 MCP。Windows / macOS。",
   "author": "lisusu",
   "applications": {
