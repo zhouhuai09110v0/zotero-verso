@@ -56,6 +56,14 @@ function createCLITrans(env) {
   }
 
   // ------------------------------------------------------------- prompts
+  /** Pure: translate one paragraph from its printed image, formulas as LaTeX. */
+  function paraVisionPrompt(langName, glossary) {
+    return translatorSystemPrompt(langName, glossary) +
+      "\n\nAn image of the paragraph exactly as printed in the PDF is attached, together with the text extracted from " +
+      "it; the extracted text often loses fractions, subscripts, superscripts and symbols. Read the formulas from the " +
+      "image. Translate the prose; write every formula, variable and symbol in LaTeX — inline as $…$, a displayed " +
+      "equation on its own line as $$…$$. Keep labels such as (A1) or equation numbers. Output only the translation.";
+  }
   function translatorSystemPrompt(langName, glossary) {
     let p =
       "You are a professional academic translator. Translate the text the user gives you into " +
@@ -1438,7 +1446,7 @@ function createCLITrans(env) {
   }
   /** Translation text + engine pills + copy / save-to-note. Used by the selection popup ("dark") and the
    *  paragraph card ("teal"). */
-  function buildTranslatePanel(doc, { source, attachmentID, pageLabel, engine, auto, theme, onClose, qa }) {
+  function buildTranslatePanel(doc, { source, attachmentID, pageLabel, engine, auto, theme, onClose, qa, vision }) {
     const T = THEMES[theme] || THEMES.dark;
     const root = doc.createElement("div");
     root.style.cssText = "font-family:system-ui,sans-serif;text-align:left;color:" + T.fg + ";";
@@ -1480,14 +1488,29 @@ function createCLITrans(env) {
       status.textContent = engineLabel(eng) + " 翻译中…" + (ENGINES[eng].cli ? "约需几秒" : "");
       const t0 = Date.now();
       try {
-        const text = await translate(source, eng);
+        // paragraphs with formulas: the extracted text has lost fractions and scripts, so a vision engine
+        // translates from a picture of the printed paragraph and writes the math as LaTeX (rendered below)
+        let viaImage = false, text = null;
+        if (vision && pref("paraVisionFormulas") !== false && visionCapable(eng) && looksMathy(source)) {
+          const img = await vision.snapshot().catch((e) => { LOG("snapshot failed", e); return null; });
+          if (img) {
+            try {
+              text = await callVision(eng, paraVisionPrompt(pref("targetLangName") || "简体中文",
+                glossaryForText(parseGlossary(pref("glossary")), source)), "Extracted text (formulas may be garbled — trust the image):\n" + source, [img]);
+              viaImage = true;
+            } catch (e) { LOG("vision translation failed, falling back to text", e); }
+          }
+        }
+        if (text == null) text = await translate(source, eng);
         if (seq !== runSeq) return;
-        const clean = String(text).replace(/<\/?(?:sup|sub|b|i|em|strong|span|p|br)\b[^>]*>/gi, "");
+        const clean = String(text).replace(/<\/?(?:sup|sub|b|i|em|strong|span|p|br)\b[^>]*>/gi, "").trim();
         current = { engine: eng, text: clean };
         loader.style.display = "none";
-        result.textContent = clean;
+        result.textContent = "";
+        if (viaImage || splitMath(clean).some((x) => x.t !== "text")) result.appendChild(renderAnswer(doc, clean));
+        else result.textContent = clean;
         anim(result, [{ opacity: 0, transform: "translateY(5px)" }, { opacity: 1, transform: "none" }], { duration: 240, easing: "ease-out" });
-        status.textContent = "Verso · " + engineLabel(eng) + " · " + ((Date.now() - t0) / 1000).toFixed(1) + "s";
+        status.textContent = "Verso · " + engineLabel(eng) + (viaImage ? " · 看图" : "") + " · " + ((Date.now() - t0) / 1000).toFixed(1) + "s";
       } catch (e) {
         if (seq !== runSeq) { LOG(e); return; }
         loader.style.display = "none";
@@ -1732,6 +1755,7 @@ function createCLITrans(env) {
     const panel = buildTranslatePanel(doc, {
       source: para.text, attachmentID: reader.itemID, pageLabel: view.pageLabel || String(idx + 1),
       engine: paraEngine(), auto: true, theme: "teal", onClose: close,
+      vision: { snapshot: () => snapshotPage(view, para.rect, w) },
       qa: {
         context: async () => {
           const it = Zotero.Items.get(reader.itemID), parent = it && it.parentItem;
@@ -2840,7 +2864,7 @@ function createCLITrans(env) {
       parseGoogleResponse, chunkText, buildCodexArgs, buildClaudeArgs, buildGeminiArgs, parseGeminiResponse,
       splitMessages, pickEngineFromModel, handleChatRequest, handleTranslateRequest, handleMcpRequest,
       parseBatchResult, batchSystemPrompt, parseVisionResult, visionPrompt, translateSegment, runBatch, mcpDispatch, pdf2zhArgs,
-      noteBlockHTML, qaNoteBlockHTML, splitMath, looksMathy, renderAnswer, katex, buildQAPrompt, qaSystemPrompt, pageTextOf, qaEngine, runWithFlagFallback, decodeOutput, buildDeepSeekBody, parseDeepSeekResponse, deepseekErrorText, proxyEnvFromInfo, aiProxyEnv, netHint, isProxyFailure, friendlyError, cmpVersion, latestUpdate, fetchUpdateManifest, UPDATE_SOURCES, headerValue, formatProgress, fmtDuration,
+      noteBlockHTML, paraVisionPrompt, qaNoteBlockHTML, splitMath, looksMathy, renderAnswer, katex, buildQAPrompt, qaSystemPrompt, pageTextOf, qaEngine, runWithFlagFallback, decodeOutput, buildDeepSeekBody, parseDeepSeekResponse, deepseekErrorText, proxyEnvFromInfo, aiProxyEnv, netHint, isProxyFailure, friendlyError, cmpVersion, latestUpdate, fetchUpdateManifest, UPDATE_SOURCES, headerValue, formatProgress, fmtDuration,
       normalizePlaceholders, placeholdersIntact, isFormulaDense, isReferenceLike, isFragment, segmentGuard,
       findParagraph, isTranslationTitle, engineFromTitle, docStats, docLayout,
       attached: () => [...attachedWins.keys()].map((w) => { try { return w.location.href.slice(0, 80); } catch (e) { return "?"; } }),

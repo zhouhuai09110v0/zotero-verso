@@ -43,3 +43,4 @@ pref("extensions.zotero.clitrans.qaEnabled", true);
 pref("extensions.zotero.clitrans.qaEngine", "");
 pref("extensions.zotero.clitrans.qaPageContext", true);
 pref("extensions.zotero.clitrans.qaVision", true);
+pref("extensions.zotero.clitrans.paraVisionFormulas", true);

@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-0.9.1-D8432E">
+  <img alt="version" src="https://img.shields.io/badge/version-0.9.2-D8432E">
   <img alt="zotero" src="https://img.shields.io/badge/Zotero-7%20%E2%80%93%2010-0F6E6E">
   <img alt="platform" src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS-supported-1C1B19">
   <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-blue">
@@ -55,7 +55,7 @@
 
 ## 安装
 
-1. 在本仓库文件列表中点开最新的 [`verso-0.9.1.xpi`](verso-0.9.1.xpi)，再点 **Download raw file** 下载。
+1. 在本仓库文件列表中点开最新的 [`verso-0.9.2.xpi`](verso-0.9.2.xpi)，再点 **Download raw file** 下载。
    > 用 Firefox 下载时请右键链接选「另存为」，否则浏览器会尝试把它当作自己的扩展安装。
 2. 打开 Zotero → **工具 → 插件**（Tools → Plugins）→ 右上角齿轮 → **从文件安装插件…**（Install Plugin From File…），选中刚下载的 `.xpi`。
 3. 安装完成后无需重启。
@@ -103,7 +103,9 @@
 2. 这一段会被圈出，译文卡片从它正下方滑出。
 3. 再点一次同一段，或点卡片右下角的 **✕**，即可收起。
 
-卡片同样支持换引擎、复制、存入笔记。可以同时展开多个段落。缩放页面时卡片会跟着段落移动。
+卡片同样支持换引擎、复制、存入笔记。
+
+**含公式的段落**：PDF 提取出来的文字常常丢掉分式和上下标（例如把 $L<\frac{c_1}{2a}$ 变成「L < c1」）。用 GPT / Claude / Gemini / deepseek-flash 时，插件会把这一段在 PDF 里的样子截图交给模型翻译，译文里的公式按排版显示；普通段落仍按文字翻译，速度不受影响。可在设置里关闭；Google 引擎始终按文字翻译。可以同时展开多个段落。缩放页面时卡片会跟着段落移动。
 
 快捷键可以在设置里换成 `Ctrl`、`⌘ / Win`、`Shift`，或者关闭这个功能。段落翻译也可以单独指定引擎（例如划词用 Google，段落用 GPT）。
 
@@ -329,6 +331,10 @@ Verso 就是原来的「智译 CLI Translate」，0.7.0 起更名并更换了图
 ---
 
 ## 更新日志
+
+**0.9.2**
+- 段落翻译：含公式的段落改为看图翻译，译文里的公式（分式、上下标、希腊字母）按排版显示，不再丢失；普通段落不受影响；
+- 设置页「段落翻译」新增对应开关。
 
 **0.9.1**
 - 段落问答里的公式正确排版（基于 KaTeX，输出 MathML），不再出现 `$` 等符号；支持独立公式、表格；
