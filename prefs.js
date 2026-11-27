@@ -39,3 +39,6 @@ pref("extensions.zotero.clitrans.deepseekApiKey", "");
 pref("extensions.zotero.clitrans.deepseekModel", "deepseek-flash");
 pref("extensions.zotero.clitrans.deepseekBaseURL", "");
 pref("extensions.zotero.clitrans.translateFigures", true);
+pref("extensions.zotero.clitrans.qaEnabled", true);
+pref("extensions.zotero.clitrans.qaEngine", "");
+pref("extensions.zotero.clitrans.qaPageContext", true);

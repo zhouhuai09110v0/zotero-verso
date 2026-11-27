@@ -62,6 +62,17 @@
   </groupbox>
 
   <groupbox>
+    <label><html:h2>段落问答（问 AI）</html:h2></label>
+    <checkbox label="在段落译文卡片上显示「问 AI」按钮" preference="extensions.zotero.clitrans.qaEnabled"/>
+    <html:div class="row"><html:span class="k">回答引擎</html:span>
+      <menulist preference="extensions.zotero.clitrans.qaEngine"><menupopup>
+        <menuitem label="自动（跟随段落翻译 / 默认引擎）" value=""/><menuitem label="GPT · Codex CLI" value="codex"/><menuitem label="Claude · Claude Code CLI" value="claude"/><menuitem label="Gemini" value="gemini"/><menuitem label="DeepSeek（API Key）" value="deepseek"/>
+      </menupopup></menulist></html:div>
+    <checkbox label="把这一页的全文一起发给模型作为上下文（回答更准，略多耗额度）" preference="extensions.zotero.clitrans.qaPageContext"/>
+    <html:div class="hint" style="margin-left:0">按住快捷键点击段落出现译文卡片后，点卡片上的「问 AI」：可以点「解释这一段」「公式 / 符号」等快捷问题，也可以自己输入问题并继续追问。模型会参考论文标题、摘要、这一段和它的译文（以及本页全文）作答；回答可复制或存入笔记。Google 不能用于问答。</html:div>
+  </groupbox>
+
+  <groupbox>
     <label><html:h2>GPT / Claude：本机 CLI（无需 API Key）</html:h2></label>
     <html:div class="row"><html:span class="k">Codex CLI 路径</html:span>
       <html:input type="text" placeholder="留空自动检测" preference="extensions.zotero.clitrans.codexPath"/></html:div>

@@ -1062,10 +1062,23 @@ function createCLITrans(env) {
       (meta ? '<p><span style="color:#888">— ' + escapeHTML(meta) + "</span></p>" : "") + "<hr/>";
   }
   async function saveToNote({ attachmentID, source, translation, engine, pageLabel }) {
+    return appendNoteBlock(attachmentID, noteBlockHTML({ source, translation, engineLabel: engineLabel(engine), pageLabel }));
+  }
+  /** Pure: one Q&A exchange about a paragraph, as note HTML. */
+  function qaNoteBlockHTML({ source, question, answer, engineLabel, pageLabel }) {
+    const meta = ["AI 问答", engineLabel, pageLabel ? "p. " + pageLabel : ""].filter(Boolean).join(" · ");
+    return "<blockquote><p>" + escapeHTML(source) + "</p></blockquote>" +
+      "<p><strong>问：</strong>" + escapeHTML(question) + "</p>" +
+      "<p><strong>答：</strong>" + escapeHTML(answer).replace(/\n/g, "<br/>") + "</p>" +
+      '<p><span style="color:#888">— ' + escapeHTML(meta) + "</span></p><hr/>";
+  }
+  async function saveQAToNote({ attachmentID, source, question, answer, engine, pageLabel }) {
+    return appendNoteBlock(attachmentID, qaNoteBlockHTML({ source, question, answer, engineLabel: engineLabel(engine), pageLabel }));
+  }
+  async function appendNoteBlock(attachmentID, block) {
     const att = Zotero.Items.get(attachmentID);
     const parent = att && att.parentItem;
     const title = pref("noteTitle") || "划词翻译笔记";
-    const block = noteBlockHTML({ source, translation, engineLabel: engineLabel(engine), pageLabel });
     let note = null;
     if (parent) {
       for (const id of parent.getNotes()) {
@@ -1087,6 +1100,187 @@ function createCLITrans(env) {
     }
     await note.saveTx();
     return note;
+  }
+
+  // ------------------------------------------------- paragraph Q&A (ask an LLM about this paragraph)
+  // Borrowed from llm-for-zotero: quick-action prompts, answers grounded in the paper (title, abstract,
+  // the page around the paragraph), follow-up questions, saving an exchange to the item's note.
+  const QA_ENGINES = ["codex", "claude", "gemini", "deepseek"];
+  const QA_QUICK = [
+    ["解释这一段", "请解释这一段在说什么，抓住核心观点和论证逻辑。"],
+    ["公式 / 符号", "这一段里的公式、符号或变量分别是什么意思？"],
+    ["说得通俗点", "请用通俗易懂的话，把这一段讲给非本专业的人听。"],
+    ["在全文的作用", "这一段在整篇论文里起什么作用？和前后文是什么关系？"],
+    ["局限与疑问", "这一段的方法、假设或结论可能有哪些局限？读者可以追问什么？"],
+  ];
+  function qaEngine() {
+    for (const e of [pref("qaEngine"), pref("paraEngine"), pref("defaultEngine")]) if (QA_ENGINES.includes(e)) return e;
+    return (pref("deepseekApiKey") || "").trim() ? "deepseek" : "codex";
+  }
+  /** Pure */
+  function qaSystemPrompt(langName) {
+    return "You are a careful research assistant helping a reader understand one paragraph of an academic paper. " +
+      "Answer in " + (langName || "简体中文") + ". Base the answer on the paper context provided; when you add general " +
+      "knowledge that is not in the paper, say so in a few words. If the context cannot answer the question, say that " +
+      "plainly instead of guessing. Be concise (about 200 words unless the reader asks for more). Write mathematics in " +
+      "LaTeX between $…$. Use short paragraphs or bullet lists; no headings, no preamble, no closing pleasantries.";
+  }
+  /** Pure: the user message for one question, with the paper context and the conversation so far. */
+  function buildQAPrompt({ title, abstract, pageText, paragraph, translation, history, question }) {
+    const cut = (s, n) => { s = String(s || "").trim(); return s.length > n ? s.slice(0, n) + " …" : s; };
+    const parts = [];
+    if (title) parts.push("Paper title: " + cut(title, 300));
+    if (abstract) parts.push("Abstract:\n" + cut(abstract, 1800));
+    if (pageText) parts.push("Text of the page that contains the paragraph (extracted from the PDF, may be imperfect):\n" + cut(pageText, 6000));
+    parts.push("The paragraph the reader is asking about:\n\"\"\"\n" + cut(paragraph, 4000) + "\n\"\"\"");
+    if (translation) parts.push("Its translation:\n" + cut(translation, 3000));
+    const turns = (history || []).slice(-6);
+    if (turns.length) parts.push("Conversation so far:\n" + turns.map((t) => "Q: " + cut(t.q, 800) + "\nA: " + cut(t.a, 1500)).join("\n\n"));
+    parts.push("Reader's question: " + String(question || "").trim());
+    return parts.join("\n\n");
+  }
+  /** Pure-ish: plain text of a page from Zotero's char list (for context). */
+  function pageTextOf(chars) {
+    let t = "";
+    for (const c of chars || []) { t += c.c == null ? "" : c.c; if (c.lineBreakAfter) t += "\n"; else if (c.spaceAfter) t += " "; }
+    return t.replace(/-\n(?=[a-z])/g, "").replace(/\n(?!\n)/g, " ").replace(/[ \t]+/g, " ").trim();
+  }
+  /** Minimal Markdown → DOM (paragraphs, bullet / numbered lists, **bold**, `code`); never innerHTML. */
+  function renderAnswer(doc, text) {
+    const frag = doc.createDocumentFragment();
+    const inline = (el, s) => {
+      for (const tok of String(s).split(/(\*\*[^*]+\*\*|`[^`]+`)/g)) {
+        if (!tok) continue;
+        if (/^\*\*[^*]+\*\*$/.test(tok)) { const b = doc.createElement("strong"); b.textContent = tok.slice(2, -2); el.appendChild(b); }
+        else if (/^`[^`]+`$/.test(tok)) { const c = doc.createElement("code"); c.textContent = tok.slice(1, -1); c.style.cssText = "font-size:.92em;padding:0 3px;border-radius:3px;background:rgba(15,110,110,.10);"; el.appendChild(c); }
+        else el.appendChild(doc.createTextNode(tok));
+      }
+    };
+    let list = null;
+    for (const raw of String(text || "").replace(/\r/g, "").split("\n")) {
+      const line = raw.replace(/^#{1,6}\s+/, "");
+      const m = line.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)$/);
+      if (m) {
+        if (!list) { list = doc.createElement(/^\s*\d/.test(line) ? "ol" : "ul"); list.style.cssText = "margin:2px 0 6px;padding-left:20px;"; frag.appendChild(list); }
+        const li = doc.createElement("li"); inline(li, m[1]); list.appendChild(li);
+        continue;
+      }
+      list = null;
+      if (!line.trim()) continue;
+      const p = doc.createElement("div"); p.style.cssText = "margin:0 0 6px;"; inline(p, line); frag.appendChild(p);
+    }
+    return frag;
+  }
+  /** The Q&A area of a paragraph card. ctx() → {title, abstract, pageText, paragraph, translation}. */
+  function buildQAPanel(doc, { theme, ctx, attachmentID, pageLabel }) {
+    const T = THEMES[theme] || THEMES.teal;
+    const root = doc.createElement("div");
+    root.style.cssText = "margin-top:10px;padding-top:9px;border-top:1px dashed " + T.line + ";font-family:system-ui,sans-serif;";
+    const quick = doc.createElement("div");
+    quick.style.cssText = "display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;";
+    const log = doc.createElement("div");
+    log.style.cssText = "max-height:340px;overflow:auto;display:flex;flex-direction:column;gap:8px;";
+    const row = doc.createElement("div");
+    row.style.cssText = "display:flex;gap:6px;align-items:flex-end;margin-top:8px;";
+    const input = doc.createElement("textarea");
+    input.rows = 1;
+    input.placeholder = "就这一段提问…（Enter 发送，Shift+Enter 换行）";
+    input.style.cssText = "flex:1;min-width:0;resize:none;box-sizing:border-box;font:13.5px/1.5 system-ui,sans-serif;padding:6px 9px;" +
+      "border-radius:8px;border:1px solid " + T.line + ";background:#FFFFFF;color:#1C1B19;max-height:120px;outline:none;";
+    const send = mkPill(doc, "发送", () => ask(input.value));
+    send.style.background = T.onBg; send.style.color = T.onFg; send.style.borderColor = T.onBg;
+    const meta = doc.createElement("div");
+    meta.style.cssText = "display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:7px;font-size:11.5px;color:" + T.sub + ";";
+    const engLbl = doc.createElement("span");
+    engLbl.textContent = "回答引擎：";
+    meta.appendChild(engLbl);
+    let engine = qaEngine();
+    const engBtns = {};
+    const paintEng = () => {
+      for (const [k, b] of Object.entries(engBtns)) {
+        const on = k === engine;
+        b.style.background = on ? T.onBg : "transparent"; b.style.color = on ? T.onFg : T.fg; b.style.borderColor = on ? T.onBg : T.line;
+      }
+    };
+    for (const k of QA_ENGINES) {
+      engBtns[k] = mkPill(doc, ENGINES[k].label, () => { engine = k; paintEng(); });
+      engBtns[k].style.fontSize = "11.5px"; engBtns[k].style.padding = "2px 9px";
+      meta.appendChild(engBtns[k]);
+    }
+    paintEng();
+    for (const [label, q] of QA_QUICK) {
+      const b = mkPill(doc, label, () => ask(q, label));
+      b.style.borderColor = T.line;
+      quick.appendChild(b);
+    }
+    // pdf.js / the reader react to single keys (n, p, arrows…): keep typing inside the box
+    for (const type of ["keydown", "keyup", "keypress"]) input.addEventListener(type, (e) => e.stopPropagation());
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); ask(input.value); }
+    });
+    input.addEventListener("input", () => { input.style.height = "auto"; input.style.height = Math.min(120, input.scrollHeight + 2) + "px"; });
+
+    const history = [];
+    let busy = false;
+    const bubble = (who, text) => {
+      const b = doc.createElement("div");
+      b.style.cssText = who === "q"
+        ? "align-self:flex-end;max-width:88%;padding:6px 10px;border-radius:10px 10px 2px 10px;font-size:13.5px;line-height:1.55;" +
+          "background:" + T.onBg + ";color:" + T.onFg + ";white-space:pre-wrap;word-break:break-word;"
+        : "align-self:stretch;padding:8px 11px;border-radius:2px 10px 10px 10px;font-size:13.8px;line-height:1.65;" +
+          "background:rgba(255,255,255,.78);color:#1C1B19;word-break:break-word;user-select:text;-moz-user-select:text;cursor:text;";
+      if (text != null) b.textContent = text;
+      log.appendChild(b);
+      log.scrollTop = log.scrollHeight;
+      return b;
+    };
+    async function ask(question, shown) {
+      question = String(question || "").trim();
+      if (!question || busy) return;
+      busy = true; input.value = ""; input.style.height = "auto"; send.textContent = "…";
+      bubble("q", shown || question);
+      const a = bubble("a", null);
+      const st = doc.createElement("div");
+      st.style.cssText = "font-size:12px;color:#7A746A;";
+      st.textContent = engineLabel(engine) + " 思考中…" + (ENGINES[engine].cli ? "约需几秒到十几秒" : "");
+      a.appendChild(st);
+      anim(st, [{ opacity: 0.4 }, { opacity: 1 }, { opacity: 0.4 }], { duration: 1200, iterations: Infinity });
+      const t0 = Date.now(), eng = engine;
+      try {
+        const c = await ctx();
+        const text = String(await callLLM(eng, qaSystemPrompt(pref("targetLangName") || "简体中文"),
+          buildQAPrompt(Object.assign({}, c, { history, question })))).trim();
+        history.push({ q: question, a: text });
+        a.textContent = "";
+        a.appendChild(renderAnswer(doc, text));
+        const foot = doc.createElement("div");
+        foot.style.cssText = "display:flex;gap:5px;align-items:center;margin-top:4px;font-size:11px;color:#7A746A;";
+        const lbl = doc.createElement("span");
+        lbl.textContent = engineLabel(eng) + " · " + ((Date.now() - t0) / 1000).toFixed(1) + "s";
+        lbl.style.marginRight = "auto";
+        const cp = mkPill(doc, "复制", (b) => { try { Zotero.Utilities.Internal.copyTextToClipboard(text); b.textContent = "已复制 ✓"; } catch (e) {} });
+        const sv = mkPill(doc, "存入笔记", async (b) => {
+          try {
+            await saveQAToNote({ attachmentID, source: cleanSelection(c.paragraph), question, answer: text, engine: eng, pageLabel });
+            b.textContent = "已存入 ✓";
+          } catch (e) { b.textContent = "失败"; LOG(e); }
+        });
+        for (const b of [cp, sv]) { b.style.fontSize = "11px"; b.style.padding = "1px 8px"; b.style.borderColor = "rgba(0,0,0,.18)"; b.style.color = "#1C1B19"; }
+        foot.append(lbl, cp, sv);
+        a.appendChild(foot);
+        anim(a, [{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }], { duration: 220, easing: "ease-out" });
+      } catch (e) {
+        a.textContent = "⚠️ " + ((e && e.message) || e);
+        LOG(e);
+      } finally {
+        busy = false; send.textContent = "发送";
+        log.scrollTop = log.scrollHeight;
+        try { input.focus(); } catch (e) {}
+      }
+    }
+    row.append(input, send);
+    root.append(quick, log, row, meta);
+    return { root, ask, focus: () => { try { input.focus(); } catch (e) {} } };
   }
 
   // ------------------------------------------------- translate panel (shared UI)
@@ -1111,7 +1305,7 @@ function createCLITrans(env) {
   }
   /** Translation text + engine pills + copy / save-to-note. Used by the selection popup ("dark") and the
    *  paragraph card ("teal"). */
-  function buildTranslatePanel(doc, { source, attachmentID, pageLabel, engine, auto, theme, onClose }) {
+  function buildTranslatePanel(doc, { source, attachmentID, pageLabel, engine, auto, theme, onClose, qa }) {
     const T = THEMES[theme] || THEMES.dark;
     const root = doc.createElement("div");
     root.style.cssText = "font-family:system-ui,sans-serif;text-align:left;color:" + T.fg + ";";
@@ -1192,6 +1386,29 @@ function createCLITrans(env) {
     save.style.background = T.accent;
     save.style.borderColor = T.accent;
     save.style.color = "#FFFFFF";
+    if (qa && pref("qaEnabled") !== false) {
+      let qp = null;
+      const askBtn = mkPill(doc, "问 AI", () => {
+        if (!qp) {
+          qp = buildQAPanel(doc, { theme, attachmentID, pageLabel,
+            ctx: async () => Object.assign({}, await qa.context(), { paragraph: source, translation: current.text }) });
+          root.appendChild(qp.root);
+          anim(qp.root, [{ opacity: 0, transform: "translateY(-4px)" }, { opacity: 1, transform: "none" }], { duration: 200 });
+          askBtn.textContent = "收起问答";
+          qp.focus();
+        } else {
+          const hide = qp.root.style.display !== "none";
+          qp.root.style.display = hide ? "none" : "";
+          askBtn.textContent = hide ? "问 AI" : "收起问答";
+          if (!hide) qp.focus();
+        }
+      });
+      askBtn.title = "就这一段向大模型提问（GPT / Claude / Gemini / DeepSeek）";
+      askBtn.style.borderColor = T.accent;
+      askBtn.style.color = T.accent;
+      askBtn.style.fontWeight = "600";
+      acts.appendChild(askBtn);
+    }
     acts.append(copy, save);
     foot.appendChild(acts);
     if (onClose) {
@@ -1382,6 +1599,16 @@ function createCLITrans(env) {
     const panel = buildTranslatePanel(doc, {
       source: para.text, attachmentID: reader.itemID, pageLabel: view.pageLabel || String(idx + 1),
       engine: paraEngine(), auto: true, theme: "teal", onClose: close,
+      qa: {
+        context: async () => {
+          const it = Zotero.Items.get(reader.itemID), parent = it && it.parentItem;
+          return {
+            title: parent ? parent.getField("title") : "",
+            abstract: parent ? parent.getField("abstractNote") : "",
+            pageText: pref("qaPageContext") === false ? "" : pageTextOf(page && page.chars),
+          };
+        },
+      },
     });
     box.append(panel.root);
     place();
@@ -2478,7 +2705,7 @@ function createCLITrans(env) {
       parseGoogleResponse, chunkText, buildCodexArgs, buildClaudeArgs, buildGeminiArgs, parseGeminiResponse,
       splitMessages, pickEngineFromModel, handleChatRequest, handleTranslateRequest, handleMcpRequest,
       parseBatchResult, batchSystemPrompt, parseVisionResult, visionPrompt, translateSegment, runBatch, mcpDispatch, pdf2zhArgs,
-      noteBlockHTML, runWithFlagFallback, decodeOutput, buildDeepSeekBody, parseDeepSeekResponse, deepseekErrorText, proxyEnvFromInfo, aiProxyEnv, netHint, isProxyFailure, friendlyError, cmpVersion, latestUpdate, fetchUpdateManifest, UPDATE_SOURCES, headerValue, formatProgress, fmtDuration,
+      noteBlockHTML, qaNoteBlockHTML, buildQAPrompt, qaSystemPrompt, pageTextOf, qaEngine, runWithFlagFallback, decodeOutput, buildDeepSeekBody, parseDeepSeekResponse, deepseekErrorText, proxyEnvFromInfo, aiProxyEnv, netHint, isProxyFailure, friendlyError, cmpVersion, latestUpdate, fetchUpdateManifest, UPDATE_SOURCES, headerValue, formatProgress, fmtDuration,
       normalizePlaceholders, placeholdersIntact, isFormulaDense, isReferenceLike, isFragment, segmentGuard,
       findParagraph, isTranslationTitle, engineFromTitle, docStats, docLayout,
       attached: () => [...attachedWins.keys()].map((w) => { try { return w.location.href.slice(0, 80); } catch (e) { return "?"; } }),
